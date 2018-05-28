@@ -2,8 +2,8 @@
 python-psql-replication
 =====
 
-.. image:: https://img.shields.io/pypi/v/python-psql-replication.svg
-        :target: https://pypi.org/project/python-psql-replication
+.. image:: https://img.shields.io/pypi/v/psql-replication.svg
+        :target: https://pypi.org/project/psql-replication
 
 .. image:: https://img.shields.io/travis/jiamo/pfcm.svg
         :target: https://travis-ci.org/jiamo/python-psql-replication
