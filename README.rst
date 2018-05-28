@@ -31,7 +31,7 @@ before you start:
 
 ref
 -----
-https://www.postgresql.org/docs/10/static/warm-standby.html#STREAMING-REPLICATION-SLOTS
+https://www.postgresql.org/docs/10/static/logicaldecoding-example.html
 http://initd.org/psycopg/docs/advanced.html#replication-support
 
 
