@@ -6,6 +6,7 @@ import psycopg2.extras
 from .packet import EventWrapper
 from .row_event import (
     UpdateRowEvent, WriteRowEvent, DeleteRowEvent)
+from . import util
 
 
 class LogicStreamReader(object):
@@ -29,6 +30,7 @@ class LogicStreamReader(object):
         self.start_lsn = start_lsn
         self.data_start = start_lsn
         self.flush_lsn = start_lsn
+        self.next_lsn = start_lsn
         self.connected_stream = False
         self.only_tables = only_tables
         self.ignored_tables = ignored_tables
@@ -52,7 +54,8 @@ class LogicStreamReader(object):
         self.cur.start_replication(
             slot_name=self.slot_name,
             decode=True,
-            start_lsn=self.flush_lsn,   # first we debug don't flush
+            start_lsn=self.flush_lsn,   # first we debug don't flush,
+            options={"include-lsn": True}
         )
 
         self.connected_stream = True
@@ -65,7 +68,7 @@ class LogicStreamReader(object):
         else:
             # update it
             self.flush_lsn = lsn    # here we update lsn
-        self.cur.send_feedback(flush_lsn=lsn, reply=True)
+        self.cur.send_feedback(write_lsn=lsn, flush_lsn=lsn, reply=True)
 
     def fetchone(self):
 
@@ -86,16 +89,21 @@ class LogicStreamReader(object):
                 # but when there always no data.
                 # the client don't have chance to send_feedback
                 # does we need to seed feedback?
-                # If we got 30 None we send back
+                # If we got 30 None we send back the next_lsn
                 self.none_times += 1
+                # but why 30
                 if self.none_times > 30:
-                    self.send_feedback()
+                    # when there is no change the next_lsn still can increase
+                    self.send_feedback(self.next_lsn)
                     self.none_times = 0
                 return None
 
             else:
+
                 self.data_start = pkt.data_start
+                self.flush_lsn = pkt.data_start
                 payload_json = json.loads(pkt.payload)
+                self.next_lsn = util.str_lsn_to_int(payload_json["nextlsn"])
                 changes = payload_json["change"]
 
             if changes:
@@ -113,7 +121,7 @@ class LogicStreamReader(object):
 
             else:
                 # seem like last wal have finished we send it
-                self.send_feedback(self.data_start)
+                self.send_feedback(self.flush_lsn)
 
     def allowed_event_list(self, only_events, ignored_events):
         if only_events is not None:
