@@ -28,8 +28,8 @@ class LogicStreamReader(object):
         self.stream_connection = None
         self.cur = None
         self.start_lsn = start_lsn
-        self.data_start = start_lsn
         self.flush_lsn = start_lsn
+        self.last_flush_lsn = start_lsn
         self.next_lsn = start_lsn
         self.connected_stream = False
         self.only_tables = only_tables
@@ -63,14 +63,21 @@ class LogicStreamReader(object):
     def send_feedback(self, lsn=None, keep_live=False):
         if not self.connected_stream:
             self.connect_to_stream()
+
         if keep_live:
             self.cur.send_feedback(reply=True)
+            return
+
         if lsn is None:
             lsn = self.flush_lsn
-        else:
-            # update it
-            self.flush_lsn = lsn    # here we update lsn
+
+        if lsn < self.last_flush_lsn:
+            self.cur.send_feedback(reply=True)
+            return
+
         self.cur.send_feedback(write_lsn=lsn, flush_lsn=lsn, reply=True)
+        self.last_flush_lsn = lsn
+        self.flush_lsn = lsn
 
     def fetchone(self):
 
@@ -101,9 +108,8 @@ class LogicStreamReader(object):
                 return None
 
             else:
-
-                self.data_start = pkt.data_start
-                self.flush_lsn = pkt.data_start
+                if pkt.data_start > self.flush_lsn:
+                    self.flush_lsn = pkt.data_start
                 payload_json = json.loads(pkt.payload)
                 self.next_lsn = util.str_lsn_to_int(payload_json["nextlsn"])
                 changes = payload_json["change"]
