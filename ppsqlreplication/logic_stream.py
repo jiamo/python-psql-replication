@@ -60,9 +60,11 @@ class LogicStreamReader(object):
 
         self.connected_stream = True
 
-    def send_feedback(self, lsn=None):
+    def send_feedback(self, lsn=None, keep_live=False):
         if not self.connected_stream:
             self.connect_to_stream()
+        if keep_live:
+            self.cur.send_feedback(reply=True)
         if lsn is None:
             lsn = self.flush_lsn
         else:
