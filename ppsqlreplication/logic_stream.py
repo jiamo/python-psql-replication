@@ -2,11 +2,21 @@
 
 import psycopg2
 import json
+import logging
 import psycopg2.extras
 from .packet import EventWrapper
 from .row_event import (
     UpdateRowEvent, WriteRowEvent, DeleteRowEvent)
 from . import util
+
+
+logger = logging.getLogger()
+
+
+class WalJsonError(Exception):
+    def __init__(self, err_json):
+        super().__init__()
+        self.err_json = err_json
 
 
 class LogicStreamReader(object):
@@ -38,6 +48,11 @@ class LogicStreamReader(object):
         self.ignored_schemas = ignored_schemas
         self.allowed_events = self.allowed_event_list(
             only_events, ignored_events)
+        only_schema_tables = []
+        for schema in only_schemas:
+            for table in only_tables:
+                only_schema_tables.append("{}.{}".format(schema, table))
+        self.add_table_str = ",".join(only_schema_tables)
 
     def close(self):
         if self.connected_stream:
@@ -55,7 +70,10 @@ class LogicStreamReader(object):
             slot_name=self.slot_name,
             decode=True,
             start_lsn=self.flush_lsn,   # first we debug don't flush,
-            options={"include-lsn": True}
+            options={
+                "include-lsn": True,
+                "add-tables": self.add_table_str
+            }
         )
 
         self.connected_stream = True
@@ -110,9 +128,24 @@ class LogicStreamReader(object):
             else:
                 if pkt.data_start > self.flush_lsn:
                     self.flush_lsn = pkt.data_start
-                payload_json = json.loads(pkt.payload)
-                self.next_lsn = util.str_lsn_to_int(payload_json["nextlsn"])
-                changes = payload_json["change"]
+                try:
+                    payload_json = json.loads(pkt.payload)
+                    self.next_lsn = util.str_lsn_to_int(payload_json["nextlsn"])
+                    changes = payload_json["change"]
+                except json.decoder.JSONDecodeError:
+                    # raise it or handle it ?
+                    # this may be too ugly may be can use regex
+                    # to match '"nextlsn":"2F/804EE880"'
+                    # but I think index may be fast here
+                    logger.error(pkt.payload[0:2000])
+                    next_lsn_index = pkt.payload.index('"nextlsn"')
+                    next_lsn_len = len('"nextlsn"')
+                    next_lsn = pkt.payload[
+                        next_lsn_index + next_lsn_len + 2:  # 2 is :"
+                        next_lsn_index + next_lsn_len + 2 + 11  # 11 is the lsn
+                    ]
+                    self.next_lsn = util.str_lsn_to_int(next_lsn)
+                    changes = []
 
             if changes:
                 wraper = EventWrapper(
@@ -130,6 +163,7 @@ class LogicStreamReader(object):
             else:
                 # seem like last wal have finished we send it
                 self.send_feedback(self.flush_lsn)
+
 
     def allowed_event_list(self, only_events, ignored_events):
         if only_events is not None:
