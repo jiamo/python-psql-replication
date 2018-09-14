@@ -30,7 +30,9 @@ class LogicStreamReader(object):
                  only_schemas=None,
                  ignored_schemas=None,
                  start_lsn=0,
-                 slot_name=None):
+                 slot_name=None,
+                 use_add_table_option=True,
+                 ):
 
         self.slot_name = slot_name
         self.none_times = 0  # we compute the total sleep in logic_stream
@@ -49,10 +51,12 @@ class LogicStreamReader(object):
         self.allowed_events = self.allowed_event_list(
             only_events, ignored_events)
         only_schema_tables = []
+        # AWS POSTGRES don't support the add-table
         for schema in only_schemas:
             for table in only_tables:
                 only_schema_tables.append("{}.{}".format(schema, table))
         self.add_table_str = ",".join(only_schema_tables)
+        self.use_add_table_option = use_add_table_option
 
     def close(self):
         if self.connected_stream:
@@ -66,14 +70,17 @@ class LogicStreamReader(object):
         )
 
         self.cur = self.stream_connection.cursor()
+        options = {
+            "include-lsn": True,
+        }
+        if self.use_add_table_option:
+            options["add-tables"] = self.add_table_str
+
         self.cur.start_replication(
             slot_name=self.slot_name,
             decode=True,
             start_lsn=self.flush_lsn,   # first we debug don't flush,
-            options={
-                "include-lsn": True,
-                "add-tables": self.add_table_str
-            }
+            options=options
         )
 
         self.connected_stream = True
